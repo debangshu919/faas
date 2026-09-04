@@ -77,7 +77,7 @@ describe('logs controller', () => {
 		fs.readFile = originalReadFile;
 	});
 
-	it('returns only exact deployment records in their original order', async () => {
+	it('should return only exact deployment records in their original order', async () => {
 		const allLogs =
 			'2026-09-02T10:00:00.000Z - app | first line\ncontinued line\n\n' +
 			'2026-09-02T10:00:01.000Z - app-2 | private output\n' +
@@ -107,7 +107,7 @@ describe('logs controller', () => {
 		assert.deepStrictEqual(readCalls, [[expectedLogFilePath, 'utf-8']]);
 	});
 
-	it('returns an empty body when the log file is empty', async () => {
+	it('should return an empty body when the log file is empty', async () => {
 		mockReadFile(() => Promise.resolve(''));
 
 		const { response, nextError } = await invokeLogs({ suffix: 'app' });
@@ -117,7 +117,7 @@ describe('logs controller', () => {
 		assert.strictEqual(response.body, '');
 	});
 
-	it('returns an empty body when the deployment has no log records', async () => {
+	it('should return an empty body when the deployment has no log records', async () => {
 		mockReadFile(() =>
 			Promise.resolve('2026-09-02T10:00:00.000Z - another-app | output\n')
 		);
@@ -129,7 +129,7 @@ describe('logs controller', () => {
 		assert.strictEqual(response.body, '');
 	});
 
-	it('returns an empty body when the log file does not exist', async () => {
+	it('should return an empty body when the log file does not exist', async () => {
 		const error = Object.assign(new Error('file does not exist'), {
 			code: 'ENOENT'
 		});
@@ -153,7 +153,7 @@ describe('logs controller', () => {
 	];
 
 	for (const { name, body } of invalidBodies) {
-		it(`rejects ${name} without reading the log file`, async () => {
+		it(`should reject ${name} without reading the log file`, async () => {
 			let readCount = 0;
 			mockReadFile(() => {
 				readCount += 1;
@@ -173,7 +173,7 @@ describe('logs controller', () => {
 		});
 	}
 
-	it('forwards a sanitized server error when the log file cannot be read', async () => {
+	it('should forward a sanitized server error when the log file cannot be read', async () => {
 		const originalMessage =
 			'EACCES: permission denied, open /private/faas/app.log';
 		const error = Object.assign(new Error(originalMessage), {
