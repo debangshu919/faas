@@ -34,6 +34,9 @@ export const deployDelete = catchAsync(
 		// Retrieve the child process associated with the application and kill it
 		application.kill();
 
+		// Stop the logger associated with the application
+		await application.logger?.close();
+
 		// Remove the application Applications object
 		delete Applications[suffix];
 
