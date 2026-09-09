@@ -2,9 +2,10 @@ import { strict as assert } from 'assert';
 import { ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import fs from 'fs';
-import { resolve } from 'path';
+import { join } from 'path';
 import { PassThrough } from 'stream';
 import { Resource } from '../app';
+import { logsDirectory } from '../utils/config';
 import { logProcessOutput, ProcessLogHandle } from '../utils/logger';
 
 type LogProcessOutput = (
@@ -39,7 +40,6 @@ const originalConsoleLog = console.log;
 const originalExistsSync = mutableFs.existsSync;
 const originalMkdir = mutableFsPromises.mkdir;
 const originalMkdirSync = mutableFs.mkdirSync;
-const expectedLogFile = resolve(__dirname, '../../logs/app.log');
 
 const resource: Resource = {
 	id: 'logger-lifecycle-test',
@@ -47,6 +47,9 @@ const resource: Resource = {
 	jsons: [],
 	runners: []
 };
+
+const expectedLogDirectory = join(logsDirectory, resource.id);
+const expectedLogFile = join(expectedLogDirectory, 'app.log');
 
 function createMockProcess(): MockProcess {
 	const stdout = new PassThrough();
@@ -61,15 +64,23 @@ function createMockProcess(): MockProcess {
 }
 
 function recordPayload(record: string): string {
-	const separator = ` - ${resource.id} | `;
-	const separatorIndex = record.indexOf(separator);
+	const isoPrefixRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z - /;
 
-	assert.notStrictEqual(
-		separatorIndex,
-		-1,
-		'log record has deployment prefix'
+	assert.ok(
+		isoPrefixRegex.test(record),
+		'log record begins with ISO timestamp and separator'
 	);
-	return record.slice(separatorIndex + separator.length);
+	assert.strictEqual(
+		record.includes(`${resource.id} |`),
+		false,
+		'log record should not contain deployment prefix'
+	);
+	assert.strictEqual(
+		record.includes(resource.id),
+		false,
+		'log record should not contain deployment id'
+	);
+	return record.replace(isoPrefixRegex, '');
 }
 
 async function flushAsyncWork(): Promise<void> {
@@ -79,17 +90,21 @@ async function flushAsyncWork(): Promise<void> {
 describe('process logger lifecycle', () => {
 	let append: (record: string) => Promise<void>;
 	let consoleLines: string[];
+	let mkdirPaths: string[];
 	let writePaths: string[];
 	let writes: string[];
 
 	beforeEach(() => {
 		append = () => Promise.resolve();
 		consoleLines = [];
+		mkdirPaths = [];
 		writePaths = [];
 		writes = [];
 
-		mutableFsPromises.mkdir = (() =>
-			Promise.resolve(undefined)) as typeof fs.promises.mkdir;
+		mutableFsPromises.mkdir = ((targetPath: fs.PathLike) => {
+			mkdirPaths.push(String(targetPath));
+			return Promise.resolve(undefined);
+		}) as typeof fs.promises.mkdir;
 		mutableFsPromises.appendFile = ((
 			filePath: fs.PathLike,
 			data: string
@@ -99,7 +114,10 @@ describe('process logger lifecycle', () => {
 			return append(data);
 		}) as typeof fs.promises.appendFile;
 		mutableFs.existsSync = () => true;
-		mutableFs.mkdirSync = (() => undefined) as typeof fs.mkdirSync;
+		mutableFs.mkdirSync = ((targetPath: fs.PathLike) => {
+			mkdirPaths.push(String(targetPath));
+			return undefined;
+		}) as typeof fs.mkdirSync;
 		mutableFs.appendFileSync = ((filePath: fs.PathLike, data: string) => {
 			writePaths.push(String(filePath));
 			writes.push(data);
@@ -182,6 +200,23 @@ describe('process logger lifecycle', () => {
 		]);
 	});
 
+	it('should format log file content with ISO timestamp and message without deployment ID', async () => {
+		const { proc, stdout } = createMockProcess();
+		const handle = createLogger(proc, resource);
+		const message = 'deterministic-log-entry';
+
+		stdout.write(message);
+		await handle.close();
+
+		assert.strictEqual(writes.length, 1);
+		assert.strictEqual(writePaths[0], expectedLogFile);
+		assert.match(
+			writes[0],
+			/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z - deterministic-log-entry\n$/
+		);
+		assert.strictEqual(writes[0].includes(resource.id), false);
+	});
+
 	it('should preserve arbitrary multiline chunks without mangling them', async () => {
 		const { proc, stdout } = createMockProcess();
 		const handle = createLogger(proc, resource);
@@ -191,6 +226,7 @@ describe('process logger lifecycle', () => {
 		await handle.close();
 
 		assert.strictEqual(writes.length, 1);
+		assert.strictEqual(writePaths[0], expectedLogFile);
 		assert.strictEqual(recordPayload(writes[0]), `${chunk}\n`);
 	});
 
@@ -231,6 +267,35 @@ describe('process logger lifecycle', () => {
 		assert.deepStrictEqual(writes.map(recordPayload), ['accepted\n']);
 		assert.strictEqual(stdout.listenerCount('data'), 0);
 		assert.strictEqual(stderr.listenerCount('data'), 0);
+	});
+
+	it('should not recreate directory when late data arrives after close and directory removal', async () => {
+		const { proc, stderr, stdout } = createMockProcess();
+		const handle = createLogger(proc, resource);
+
+		stdout.write('accepted-data');
+		await handle.close();
+
+		assert.strictEqual(writes.length, 1);
+		assert.ok(mkdirPaths.includes(expectedLogDirectory));
+
+		const mkdirCountAfterClose = mkdirPaths.length;
+		const writesCountAfterClose = writes.length;
+
+		stdout.write('late-stdout-after-delete');
+		stderr.write('late-stderr-after-delete');
+		await flushAsyncWork();
+
+		assert.strictEqual(
+			mkdirPaths.length,
+			mkdirCountAfterClose,
+			'mkdir should not be called after close'
+		);
+		assert.strictEqual(
+			writes.length,
+			writesCountAfterClose,
+			'no additional writes should occur after close'
+		);
 	});
 
 	it('should return the same drain promise when close is called repeatedly', async () => {
