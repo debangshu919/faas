@@ -187,6 +187,7 @@ describe('deploy delete', () => {
 			'proc.kill',
 			'logger.close',
 			'logger.drained',
+			'fs.rm',
 			'fs.rm'
 		]);
 		assert.strictEqual(Applications[suffix], undefined);

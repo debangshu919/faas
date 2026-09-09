@@ -4,7 +4,7 @@ import { rm } from 'fs/promises';
 import { join } from 'path';
 
 import { Applications } from '../app';
-import { appsDirectory } from '../utils/config';
+import { appsDirectory, logsDirectory } from '../utils/config';
 import { catchAsync } from './catch';
 
 // TODO: Isn't this available inside protocol package? We MUST reuse it
@@ -40,11 +40,13 @@ export const deployDelete = catchAsync(
 		// Remove the application Applications object
 		delete Applications[suffix];
 
-		// Determine the location of the application
+		// Determine the location of the application and its logs
 		const appLocation = join(appsDirectory, suffix);
+		const logsLocation = join(logsDirectory, suffix);
 
-		// Delete the directory of the application
+		// Delete the directory of the application and its logs
 		await rm(appLocation, { recursive: true, force: true });
+		await rm(logsLocation, { recursive: true, force: true });
 
 		// Send response based on whether there was an error during deletion
 		return res.json('Deploy Delete Succeed');
