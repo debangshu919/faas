@@ -2,6 +2,7 @@ import { ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Resource } from '../app';
+import { logsDirectory } from './config';
 
 // Shuffle the array randomly on startup (equal randomness is not relevant that's why we use this sort trick)
 const ANSICode: number[] = [
@@ -17,10 +18,6 @@ const PIDToColorCodeMap: PIDToColorCodeMapType = {};
 
 // Counter for color assignment
 let colorIndex = 0;
-
-const logFilePath = path.join(__dirname, '../../logs/');
-const logFileName = 'app.log';
-const logFileFullPath = path.resolve(path.join(logFilePath, logFileName));
 
 const assignColorToWorker = (
 	deploymentName: string,
@@ -46,6 +43,8 @@ class DeploymentLogger implements ProcessLogHandle {
 
 	private readonly proc: ChildProcess;
 	private readonly resource: Resource;
+	private readonly logDirectory: string;
+	private readonly logFile: string;
 	private readonly onStdoutData: (data: Buffer) => void;
 	private readonly onStderrData: (data: Buffer) => void;
 	private readonly onProcessClose: () => void;
@@ -53,6 +52,8 @@ class DeploymentLogger implements ProcessLogHandle {
 	constructor(proc: ChildProcess, resource: Resource) {
 		this.proc = proc;
 		this.resource = resource;
+		this.logDirectory = path.join(logsDirectory, resource.id);
+		this.logFile = path.join(this.logDirectory, 'app.log');
 
 		this.onStdoutData = (data: Buffer) => {
 			this.enqueue(data.toString());
@@ -97,11 +98,11 @@ class DeploymentLogger implements ProcessLogHandle {
 
 	private async store(message: string): Promise<void> {
 		const timeStamp = new Date().toISOString();
-		const logMessage = `${timeStamp} - ${this.resource.id} | ${message}\n`;
+		const logMessage = `${timeStamp} - ${message}\n`;
 
 		try {
-			await fs.promises.mkdir(logFilePath, { recursive: true });
-			await fs.promises.appendFile(logFileFullPath, logMessage, {
+			await fs.promises.mkdir(this.logDirectory, { recursive: true });
+			await fs.promises.appendFile(this.logFile, logMessage, {
 				encoding: 'utf-8'
 			});
 		} catch (err) {
